@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "ignoreDeprecations": "6.0",
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "test/**/*", "tsup.config.ts", "examples/**/*"]
+}
