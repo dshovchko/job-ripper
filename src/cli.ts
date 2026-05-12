@@ -124,7 +124,7 @@ async function* collectFiles(pattern: string): AsyncGenerator<string> {
   try {
     // node 22+ fs.glob
     for await (const f of fs.glob(pattern)) {
-      yield f;
+      yield resolve(f);
     }
   } catch (err: any) {
     if (err.code !== 'ENOENT') throw err;
@@ -315,11 +315,33 @@ function printStatistics(result: {
  * @param code - The exit code to pass to `process.exit`.
  */
 function safeExit(code: number): void {
-  process.stdout.write('', () => {
-    process.stderr.write('', () => {
-      process.exit(code);
-    });
+  // Ignore EPIPE — expected when downstream closes the pipe early (e.g. `| head`)
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE') throw err;
   });
+  process.stderr.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE') throw err;
+  });
+
+  const tryExit = (): void => {
+    process.exit(code);
+  };
+
+  // Flush stdout, then stderr, then exit.
+  // If a stream is already destroyed, skip straight to exit.
+  if (process.stdout.writable) {
+    process.stdout.write('', () => {
+      if (process.stderr.writable) {
+        process.stderr.write('', tryExit);
+      } else {
+        tryExit();
+      }
+    });
+  } else if (process.stderr.writable) {
+    process.stderr.write('', tryExit);
+  } else {
+    tryExit();
+  }
 }
 
 /**
