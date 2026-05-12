@@ -217,10 +217,13 @@ export default async function(filePath) {
 After processing each file, `jori` echoes the file path to stdout — so the next stage receives the same paths as the current stage. The worker scripts decide what to write to disk.
 
 ```bash
+# stage 1: md → html   (writes .html files)
+# stage 2: minify html (overwrites .html)
+# stage 3: upload       (I/O-limited)
 find . -name "*.md" \
-  | jori -w render.mjs  -c 4 \   # stage 1: md → html   (writes .html files)
-  | jori -w minify.mjs  -c 4 \   # stage 2: minify html (overwrites .html)
-  | jori -w upload.mjs  -c 2     # stage 3: upload       (I/O-limited)
+  | jori -w render.mjs  -c 4 \
+  | jori -w minify.mjs  -c 4 \
+  | jori -w upload.mjs  -c 2
 ```
 
 ### With `find`, `fdir`, or `fast-glob`
