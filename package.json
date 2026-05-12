@@ -1,0 +1,46 @@
+{
+  "name": "job-ripper",
+  "version": "1.0.0-beta.1",
+  "description": "Zero-dependency CLI that rips through CPU-heavy jobs using worker_threads",
+  "license": "MIT",
+  "keywords": [
+    "worker_threads",
+    "cli",
+    "parallel",
+    "jobs",
+    "multithread"
+  ],
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "job-ripper": "./bin/job-ripper.mjs",
+    "jori": "./bin/job-ripper.mjs"
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings 3",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@exadel/eslint-config-esl": "^6.0.0",
+    "@types/node": "^25.7.0",
+    "eslint": "^9.39.4",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
