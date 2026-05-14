@@ -14,7 +14,7 @@ Feed it a file list. Give it a worker script. Chain workers like Unix pipes. It 
 
 Benchmark scenario: process files from `node_modules` across three workload profiles
 (CPU-bound compression, Markdown rendering, JSON schema validation).
-Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmarks/README.md`](./benchmarks/README.md).
+Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmarks/README.md`](https://github.com/dshovchko/job-ripper/tree/main/benchmarks/README.md).
 
 **Quick numbers — brotli + pbkdf2-sha256, Intel Core Ultra 7 155U, c=10:**
 
@@ -28,7 +28,7 @@ Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmar
 workloads, 25% for light ones. For nearly pure I/O, 1–2 workers is enough —
 the worker still unblocks the main thread even without parallelism.
 
-Run your own baseline and read the full analysis in [`benchmarks/README.md`](./benchmarks/README.md):
+Run your own baseline and read the full analysis in [`benchmarks/README.md`](https://github.com/dshovchko/job-ripper/tree/main/benchmarks/README.md):
 
 ```bash
 # Requires hyperfine — install instructions in benchmarks/README.md
@@ -218,6 +218,8 @@ export default async function(filePath) {
 ---
 
 ## Examples
+
+Looking for more? Check out the [`examples/`](https://github.com/dshovchko/job-ripper/tree/main/examples/) directory in the repository for ready-to-use worker scripts and practical use cases.
 
 ### Pipeline chain (Unix pipes)
 
