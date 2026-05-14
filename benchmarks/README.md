@@ -9,8 +9,10 @@ Three scenarios covering different bottleneck profiles. Each run compares `job-r
   - **macOS:** `brew install hyperfine`
   - **Ubuntu / Debian:** `apt install hyperfine`
   - **Fedora:** `dnf install hyperfine`
-  - **Windows:** `winget install hyperfine` or `choco install hyperfine`
+  - **Windows (WSL, Git Bash, or similar Unix-compatible environment):** `winget install hyperfine` or `choco install hyperfine`
   - **Other systems:** see the [hyperfine releases page](https://github.com/sharkdp/hyperfine/releases)
+
+- The benchmark entrypoint is `run-bench.sh` and it uses Unix tools such as `find` and `xargs`. On Windows, run the benchmarks from WSL, Git Bash, or an equivalent Unix-like shell environment.
 
 All benchmark dependencies (AJV, remark, rehype, glob libraries) are listed in [`benchmarks/package.json`](./package.json). The script installs them automatically on first run — no manual `npm install` needed.
 
@@ -18,7 +20,7 @@ All benchmark dependencies (AJV, remark, rehype, glob libraries) are listed in [
 
 | Scenario | What the worker does | Files | Count¹ | Bottleneck |
 |---|---|---|---:|---|
-| `compress-hash-js` | gzip + sha256 every `.js` file | `node_modules/**/*.js` | 7 016 | CPU |
+| `compress-hash-js` | brotli + pbkdf2-sha256 every `.js` file | `node_modules/**/*.js` | 7 016 | CPU |
 | `md-to-html` | Markdown → HTML via remark/rehype | `node_modules/**/*.md` | 810 | CPU |
 | `validate-json` | validate `package.json` against a JSON schema (AJV) | `node_modules/**/package.json` | 576 | mixed (I/O + CPU); at c=1 approaches I/O-bound — single-thread may be competitive |
 

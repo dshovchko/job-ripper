@@ -16,7 +16,7 @@ Benchmark scenario: process files from `node_modules` across three workload prof
 (CPU-bound compression, Markdown rendering, JSON schema validation).
 Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmarks/README.md`](./benchmarks/README.md).
 
-**Quick numbers — gzip + sha256, Intel Core Ultra 7 155U, c=10:**
+**Quick numbers — brotli + pbkdf2-sha256, Intel Core Ultra 7 155U, c=10:**
 
 | Approach | Mean time | vs. single-thread |
 |---|---|---|
@@ -221,7 +221,7 @@ export default async function(filePath) {
 
 ### Pipeline chain (Unix pipes)
 
-After processing each file, `jori` echoes the **original** file path to stdout — so every stage in the pipeline receives the same paths that the first stage received. Worker scripts are responsible for writing derived files (e.g. `.html`) to disk themselves; the pipeline does not rewrite paths between stages.
+After processing each file, `jori` echoes the resolved file path to stdout. If the input path was relative (for example from `find . -name "*.md"`), later pipeline stages will receive the resolved absolute path emitted by the previous stage. Worker scripts are responsible for writing derived files (e.g. `.html`) to disk themselves; the pipeline does not rewrite paths to derived filenames between stages.
 
 ```bash
 # stage 1: md → html   (writes .html files alongside .md)
