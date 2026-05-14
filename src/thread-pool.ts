@@ -105,7 +105,7 @@ export class ThreadPool extends EventEmitter {
 
     // Use current file URL's directory to locate the bundled worker-wrapper
     const isTs = import.meta.url.endsWith('.ts');
-    const url = new URL(isTs ? '../dist/worker-wrapper.js' : './worker-wrapper.js', import.meta.url);
+    const url = new URL(isTs ? './worker-wrapper.ts' : './worker-wrapper.js', import.meta.url);
 
     for (let i = 0; i < this.concurrency; i++) {
       const worker = new Worker(url, {
