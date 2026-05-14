@@ -105,11 +105,16 @@ export class ThreadPool extends EventEmitter {
 
     // Use current file URL's directory to locate the bundled worker-wrapper
     const isTs = import.meta.url.endsWith('.ts');
-    const url = new URL(isTs ? '../dist/worker-wrapper.js' : './worker-wrapper.js', import.meta.url);
+    const url = new URL(isTs ? './worker-wrapper.ts' : './worker-wrapper.js', import.meta.url);
+    // When running from TS source, ensure worker threads can strip type annotations
+    const execArgv = isTs && !process.execArgv.includes('--experimental-strip-types')
+      ? [...process.execArgv, '--experimental-strip-types']
+      : undefined;
 
     for (let i = 0; i < this.concurrency; i++) {
       const worker = new Worker(url, {
-        workerData: {scriptPath: this.userWorkerPath, workerArgs: this.workerArgs}
+        workerData: {scriptPath: this.userWorkerPath, workerArgs: this.workerArgs},
+        ...(execArgv ? {execArgv} : {})
       });
 
       worker.on('message', (msg) => this.handleMessage(worker, msg));

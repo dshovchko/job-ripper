@@ -12,23 +12,28 @@ Feed it a file list. Give it a worker script. Chain workers like Unix pipes. It 
 
 ## Benchmarks
 
-Benchmark scenario: convert 1 000 Markdown files to HTML (parse → AST manipulation → render). Run on Apple M3 Pro, 11 cores, Node.js 22.
+Benchmark scenario: process files from `node_modules` across three workload profiles
+(CPU-bound compression, Markdown rendering, JSON schema validation).
+Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmarks/README.md`](./benchmarks/README.md).
 
-| Approach | Time (median) | vs. single-thread |
+**Quick numbers — brotli + pbkdf2-sha256, Intel Core Ultra 7 155U, c=10:**
+
+| Approach | Mean time | vs. single-thread |
 |---|---|---|
-| Single-threaded loop | 18.4 s | 1× (baseline) |
-| `node:cluster` (manual) | 4.1 s | 4.5× |
-| **job-ripper** `-c 75%` | **2.3 s** | **8×** |
+| `xargs` (process per file) | 31.9 s | 21× slower |
+| Single-threaded loop | 9.4 s | baseline |
+| **job-ripper** (`find \|`) | **1.5 s** | **6× faster** |
 
-> Results vary by machine and task weight. Run your own baseline:
+**Concurrency starting point:** 75–100% of cores for CPU-bound tasks, 50–75% for mixed
+workloads, 25% for light ones. For nearly pure I/O, 1–2 workers is enough —
+the worker still unblocks the main thread even without parallelism.
+
+Run your own baseline and read the full analysis in [`benchmarks/README.md`](./benchmarks/README.md):
 
 ```bash
-# Requires hyperfine: brew install hyperfine
-./benchmarks/run-bench.sh \
-  -s md-to-html \
-  -p "node_modules/**/*.md" \
-  -f "*.md" \
-  -c 8
+# Requires hyperfine — install instructions in benchmarks/README.md
+cd benchmarks
+npm run bench:md-html -- -c 8
 ```
 
 ---
@@ -183,6 +188,8 @@ export default async function(filePath: string, args: string[]): Promise<void> {
 }
 ```
 
+> The type annotation above is for documentation purposes only — TypeScript is not required. A plain `.mjs` / `.cjs` module works exactly the same.
+
 The signature is `async` — jori correctly `await`s the result, so both sync and async bodies work. However:
 
 > **Prefer sync APIs inside the body.** Each worker runs in its own dedicated thread — blocking it is intentional and expected. `readFileSync`, `gzipSync`, `createHash` etc. avoid unnecessary Promise/microtask overhead. Reserve `async` for cases where you genuinely need it (e.g. calling an external HTTP API).
@@ -214,12 +221,12 @@ export default async function(filePath) {
 
 ### Pipeline chain (Unix pipes)
 
-After processing each file, `jori` echoes the file path to stdout — so the next stage receives the same paths as the current stage. The worker scripts decide what to write to disk.
+After processing each file, `jori` echoes the resolved file path to stdout. If the input path was relative (for example from `find . -name "*.md"`), later pipeline stages will receive the resolved absolute path emitted by the previous stage. Worker scripts are responsible for writing derived files (e.g. `.html`) to disk themselves; the pipeline does not rewrite paths to derived filenames between stages.
 
 ```bash
-# stage 1: md → html   (writes .html files)
-# stage 2: minify html (overwrites .html)
-# stage 3: upload       (I/O-limited)
+# stage 1: md → html   (writes .html files alongside .md)
+# stage 2: minify html (reads and overwrites .html files by convention in minify.mjs)
+# stage 3: upload       (I/O-limited; upload.mjs derives the .html path from the .md path)
 find . -name "*.md" \
   | jori -w render.mjs  -c 4 \
   | jori -w minify.mjs  -c 4 \
@@ -295,7 +302,7 @@ console.log(result);
 
 The `files` parameter accepts **any iterable or async iterable** — arrays, generators, `fast-glob` streams, `fdir` crawlers, database cursors, etc.
 
-**Error handling:** There is no `onError` callback. Task-level errors (throws inside your worker function) are swallowed, counted, and reflected in `result.failed`. Check that field after the call and decide what to do:
+**Error handling:** Task-level errors (throws inside your worker function) are counted and surfaced via `onTaskError` if provided, otherwise silent. They are reflected in `result.failed`. Check that field after the call and decide what to do:
 
 ```ts
 const result = await processFiles({
@@ -358,14 +365,13 @@ find . -name "*.md" | jori -w render.mjs -c 75% | jori -w upload.mjs -c 2
 
 ### Always preview with `--dry-run`
 
-Before running a worker that modifies or deletes files, verify what files would be matched:
+Before running a worker that modifies or deletes files, verify what files would be matched. `--dry-run` prints each matched path to stdout and exits without running workers:
 
 ```bash
-jori "**/*.png" -w resize.mjs --dry-run | wc -l   # count matched files
+jori "**/*.png" -w resize.mjs --dry-run          # list matched files
+jori "**/*.png" -w resize.mjs --dry-run | wc -l  # count them
 ```
 
 ---
 
-## License
-
-[MIT](./LICENSE)
+Released under the [MIT License](./LICENSE).
