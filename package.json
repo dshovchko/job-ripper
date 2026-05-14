@@ -5,19 +5,44 @@
   "license": "MIT",
   "keywords": [
     "worker_threads",
+    "thread-pool",
     "cli",
     "parallel",
-    "jobs",
-    "multithread"
+    "concurrency",
+    "cpu-bound",
+    "batch",
+    "pipeline",
+    "file-processing",
+    "performance",
+    "multithread",
+    "zero-dependency"
   ],
+  "author": "Dmytro Shovchko",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dshovchko/job-ripper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dshovchko/job-ripper/issues"
+  },
+  "homepage": "https://github.com/dshovchko/job-ripper#readme",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
-  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "bin": {
     "job-ripper": "./bin/job-ripper.mjs",

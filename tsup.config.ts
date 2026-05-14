@@ -5,6 +5,7 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
+  minify: true,
   splitting: false,
   sourcemap: true,
   target: 'node22',
