@@ -83,3 +83,13 @@ hyperfine "${HYPERFINE_OPTS[@]}" \
   -n 'fdir | job-ripper' "node ./benchmarks/runners/fdir.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
   -n 'fs.promises.glob | job-ripper' "node ./benchmarks/runners/native.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
   -n 'single-thread (fast-glob + loop)' "node ./benchmarks/$SCENARIO/single-thread.mjs \"$PATTERN\""
+
+# On Windows (Git Bash / MSYS2) the npm script runner may open a separate
+# console window that closes as soon as the process exits, swallowing all
+# output. Pause so the user can actually read the results.
+case "$OSTYPE" in
+  msys*|cygwin*|mingw*)
+    echo ""
+    read -r -p "Press Enter to close this window..."
+    ;;
+esac
