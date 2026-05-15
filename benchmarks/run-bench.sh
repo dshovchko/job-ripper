@@ -71,18 +71,38 @@ fi
 
 JORI_OPTS="-w ./benchmarks/$SCENARIO/worker.mjs -c $CONCURRENCY --silent"
 
-hyperfine "${HYPERFINE_OPTS[@]}" \
-  -n 'xargs classic (process per file)' "find ./node_modules -type f -name \"$FIND_NAME\" | xargs -P $CONCURRENCY -I {} node ./benchmarks/$SCENARIO/runner.mjs {}" \
-  -n 'findx-cli (npm package)' "npx --no-install --prefix benchmarks findx \"$PATTERN\" -C $CONCURRENCY -- node ./benchmarks/$SCENARIO/runner.mjs \"{{path}}\"" \
-  -n 'job-ripper embedded native glob' "node ./bin/job-ripper.mjs \"$PATTERN\" $JORI_OPTS" \
-  -n 'find | job-ripper' "find ./node_modules -type f -name \"$FIND_NAME\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'fast-glob | job-ripper' "node ./benchmarks/runners/fast-glob.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'globby | job-ripper' "node ./benchmarks/runners/globby.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'tinyglobby | job-ripper' "node ./benchmarks/runners/tinyglobby.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'glob | job-ripper' "node ./benchmarks/runners/glob.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'fdir | job-ripper' "node ./benchmarks/runners/fdir.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
-  -n 'fs.promises.glob | job-ripper' "node ./benchmarks/runners/native.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS" \
+# Build benchmark list dynamically — some tools are unavailable on Windows
+BENCH_CMDS=()
+
+# xargs -P and GNU find may not be available on Windows
+if command -v xargs &>/dev/null && command -v find &>/dev/null; then
+  BENCH_CMDS+=(-n 'xargs classic (process per file)' "find ./node_modules -type f -name \"$FIND_NAME\" | xargs -P $CONCURRENCY -I {} node ./benchmarks/$SCENARIO/runner.mjs {}")
+fi
+
+# findx-cli — include only when installed and functional
+if npx --no-install --prefix benchmarks findx --help &>/dev/null; then
+  BENCH_CMDS+=(-n 'findx-cli (npm package)' "npx --no-install --prefix benchmarks findx \"$PATTERN\" -C $CONCURRENCY -- node ./benchmarks/$SCENARIO/runner.mjs \"{{path}}\"")
+fi
+
+BENCH_CMDS+=(
+  -n 'job-ripper embedded native glob' "node ./bin/job-ripper.mjs \"$PATTERN\" $JORI_OPTS"
+)
+
+if command -v find &>/dev/null; then
+  BENCH_CMDS+=(-n 'find | job-ripper' "find ./node_modules -type f -name \"$FIND_NAME\" | node ./bin/job-ripper.mjs $JORI_OPTS")
+fi
+
+BENCH_CMDS+=(
+  -n 'fast-glob | job-ripper' "node ./benchmarks/runners/fast-glob.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
+  -n 'globby | job-ripper' "node ./benchmarks/runners/globby.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
+  -n 'tinyglobby | job-ripper' "node ./benchmarks/runners/tinyglobby.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
+  -n 'glob | job-ripper' "node ./benchmarks/runners/glob.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
+  -n 'fdir | job-ripper' "node ./benchmarks/runners/fdir.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
+  -n 'fs.promises.glob | job-ripper' "node ./benchmarks/runners/native.mjs \"$PATTERN\" | node ./bin/job-ripper.mjs $JORI_OPTS"
   -n 'single-thread (fast-glob + loop)' "node ./benchmarks/$SCENARIO/single-thread.mjs \"$PATTERN\""
+)
+
+hyperfine "${HYPERFINE_OPTS[@]}" "${BENCH_CMDS[@]}"
 
 # On Windows (Git Bash / MSYS2) the npm script runner may open a separate
 # console window that closes as soon as the process exits, swallowing all
@@ -92,7 +112,7 @@ case "$OSTYPE" in
   msys*|cygwin*|mingw*)
     if [[ "${NO_PAUSE:-0}" != "1" && -t 0 && -t 1 ]]; then
       echo ""
-      read -r -p "Press Enter to close this window..."
+      read -r -p "Press Enter to continue..."
     fi
     ;;
 esac
