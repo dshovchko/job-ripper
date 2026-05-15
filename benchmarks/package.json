@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bench:compress": "./run-bench.sh -s compress-hash-js -p \"node_modules/**/*.js\" -f \"*.js\"",
-    "bench:md-html": "./run-bench.sh -s md-to-html -p \"node_modules/**/*.md\" -f \"*.md\"",
-    "bench:json": "./run-bench.sh -s validate-json -p \"node_modules/**/package.json\" -f \"package.json\""
+    "bench:compress": "bash run-bench.sh -s compress-hash-js -p \"node_modules/**/*.js\" -f \"*.js\"",
+    "bench:md-html": "bash run-bench.sh -s md-to-html -p \"node_modules/**/*.md\" -f \"*.md\"",
+    "bench:json": "bash run-bench.sh -s validate-json -p \"node_modules/**/package.json\" -f \"package.json\""
   },
   "dependencies": {
     "ajv": "^8.20.0",
