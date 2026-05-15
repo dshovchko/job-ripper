@@ -86,10 +86,13 @@ hyperfine "${HYPERFINE_OPTS[@]}" \
 
 # On Windows (Git Bash / MSYS2) the npm script runner may open a separate
 # console window that closes as soon as the process exits, swallowing all
-# output. Pause so the user can actually read the results.
+# output. Only pause for interactive terminal sessions, and allow callers
+# to disable the prompt explicitly with NO_PAUSE=1.
 case "$OSTYPE" in
   msys*|cygwin*|mingw*)
-    echo ""
-    read -r -p "Press Enter to close this window..."
+    if [[ "${NO_PAUSE:-0}" != "1" && -t 0 && -t 1 ]]; then
+      echo ""
+      read -r -p "Press Enter to close this window..."
+    fi
     ;;
 esac
