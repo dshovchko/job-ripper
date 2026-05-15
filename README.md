@@ -374,6 +374,24 @@ jori "**/*.png" -w resize.mjs --dry-run          # list matched files
 jori "**/*.png" -w resize.mjs --dry-run | wc -l  # count them
 ```
 
+### File discovery: glob vs. `find` on different platforms
+
+jori accepts file paths in two ways: **built-in glob** (`jori "src/**/*.ts" -w ...`) or **stdin pipeline** (`find ... | jori -w ...`). The choice can have a significant impact on performance, especially on Windows.
+
+| Method | Linux / macOS | Windows (Git Bash / MSYS2) |
+|---|---|---|
+| Built-in glob / Node.js glob libs (`fast-glob`, `fdir`, `tinyglobby`) | Fast — native `fs` calls | Fast — native `fs` calls |
+| `find ... \| jori` | Fast — native binary | **Slow** — MSYS2 POSIX emulation layer |
+| `find ... \| xargs` | Fast — native binaries | **Slow** — both `find` and `xargs` run under MSYS2 emulation |
+
+**Why `find` is slow on Windows:** Git Bash ships a POSIX-emulated `find` (via MSYS2) that translates every path and syscall through a compatibility layer, and piping through MSYS2's emulated shell adds further overhead for every path handed off to jori. Node.js glob libraries call the Windows filesystem API directly and avoid this overhead entirely.
+
+**Recommendation:**
+
+- **Cross-platform projects** — use built-in glob or Node.js glob libraries. They perform consistently on all platforms.
+- **Linux/macOS-only** — `find` pipelines are fine and sometimes faster for complex filters (`-mtime`, `-size`, `-user`, etc.) that globs can't express.
+- **Windows with complex filters** — use PowerShell's `Get-ChildItem` or a Node.js script to produce the file list and pipe it into jori.
+
 ---
 
 Released under the [MIT License](./LICENSE).
