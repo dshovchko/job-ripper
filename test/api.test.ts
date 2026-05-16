@@ -165,4 +165,55 @@ describe('Programmatic API', () => {
       concurrency: 1
     })).rejects.toThrow('Cannot find module');
   });
+
+  it('passes worker return value to onSuccess callback', async () => {
+    const returningWorkerPath = join(fixturesDir, 'returning-worker.js');
+    await writeFile(returningWorkerPath, `
+      export default async function processFile(filePath) {
+        return { hash: 'abc123', bytes: filePath.length };
+      }
+    `);
+
+    const results: {filePath: string, result: unknown}[] = [];
+
+    const res = await processFiles({
+      files: [join(fixturesDir, 'file1.txt'), join(fixturesDir, 'file2.txt')],
+      workerPath: returningWorkerPath,
+      concurrency: 1,
+      onSuccess: (filePath, result) => {
+        results.push({filePath, result});
+      }
+    });
+
+    expect(res.total).toBe(2);
+    expect(res.success).toBe(2);
+    expect(results.length).toBe(2);
+    expect(results[0].result).toEqual({hash: 'abc123', bytes: results[0].filePath.length});
+    expect(results[1].result).toEqual({hash: 'abc123', bytes: results[1].filePath.length});
+  });
+
+  it('passes undefined result to onSuccess when worker returns nothing', async () => {
+    const voidWorkerPath = join(fixturesDir, 'void-worker.js');
+    await writeFile(voidWorkerPath, `
+      export default async function processFile(filePath) {
+        // no return
+      }
+    `);
+
+    const results: {filePath: string, result: unknown}[] = [];
+
+    const res = await processFiles({
+      files: [join(fixturesDir, 'test.txt')],
+      workerPath: voidWorkerPath,
+      concurrency: 1,
+      onSuccess: (filePath, result) => {
+        results.push({filePath, result});
+      }
+    });
+
+    expect(res.total).toBe(1);
+    expect(res.success).toBe(1);
+    expect(results.length).toBe(1);
+    expect(results[0].result).toBeUndefined();
+  });
 });

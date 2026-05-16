@@ -32,8 +32,8 @@ interface Task {
   id: number;
   /** Absolute path of the file to be processed by the worker. */
   filePath: string;
-  /** Settles the caller's promise on success. */
-  resolve: () => void;
+  /** Settles the caller's promise on success, optionally with the worker's return value. */
+  resolve: (result?: unknown) => void;
   /** Settles the caller's promise on failure. */
   reject: (err: any) => void;
 }
@@ -155,10 +155,10 @@ export class ThreadPool extends EventEmitter {
    * awaits until capacity is available (back-pressure).
    *
    * @param filePath - Absolute path of the file to process.
-   * @returns A promise that resolves when the task completes.
+   * @returns A promise that resolves with the worker's return value, or `undefined` if the worker does not return a value, when the task completes.
    * @throws If the pool has already been destroyed.
    */
-  async execute(filePath: string): Promise<void> {
+  async execute(filePath: string): Promise<unknown> {
     if (this.isDestroyed) throw new Error('ThreadPool closed');
 
     if (this.taskQueue.size + this.pendingEnqueues >= this.maxQueueSize) {
@@ -172,7 +172,7 @@ export class ThreadPool extends EventEmitter {
       if (this.isDestroyed) throw new Error('ThreadPool closed');
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       const task: Task = {id: this.nextTaskId++, filePath, resolve, reject};
       this.taskQueue.enqueue(task);
       this.pump();
@@ -258,7 +258,7 @@ export class ThreadPool extends EventEmitter {
       }
 
       case 'task_done': {
-        this.finishTask(worker, (task) => task.resolve());
+        this.finishTask(worker, (task) => task.resolve(msg.result));
         break;
       }
 
