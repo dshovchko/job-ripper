@@ -20,9 +20,9 @@ Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmar
 
 | Approach | Mean time | vs. single-thread |
 |---|---|---|
-| `xargs` (process per file) | 31.9 s | 21× slower |
+| `xargs` (process per file) | 32 s | 20× slower |
 | Single-threaded loop | 9.4 s | baseline |
-| **job-ripper** (`find \|`) | **1.5 s** | **6× faster** |
+| **job-ripper** | **1.6 s** | **6× faster** |
 
 **Concurrency starting point:** 75–100% of cores for CPU-bound tasks, 50–75% for mixed
 workloads, 25% for light ones. For nearly pure I/O, 1–2 workers is enough —
@@ -86,7 +86,7 @@ export default async function(filePath) {
 ```bash
 $ jori "src/**/*.js" -w compress.mjs -c 50%
 
-Using concurrency: 8
+Using concurrency: 6
 
 --- Processing Complete ---
 Total files: 312
@@ -156,8 +156,8 @@ Options:
 | Value | Meaning |
 |---|---|
 | `4` | Exactly 4 workers |
-| `75%` | 75 % of logical CPU cores (rounded down, min 1) |
-| _(omitted)_ | Same as `75%` |
+| `50%` | 50 % of logical CPU cores (rounded down, min 1) |
+| _(omitted)_ | Default as `75%` |
 
 ### Glob mode
 
@@ -182,10 +182,13 @@ cat file-list.txt              | jori -w process.mjs -c 4
 A worker is any ESM module that exports a `default` function:
 
 ```ts
+/**
+ * @param filePath - Absolute path to the file to process.
+ * @param args - Extra arguments forwarded from CLI: `jori ... -- --flag value`.
+ * @returns Optional value forwarded to `onSuccess(filePath, result)` in the programmatic API.
+ */
 export default async function(filePath: string, args: string[]): Promise<unknown> {
-  // filePath — absolute path to the file to process
-  // args     — forwarded from CLI: jori ... -- --flag value
-  // return value (if any) is forwarded to onSuccess in programmatic API
+  // ...
 }
 ```
 
