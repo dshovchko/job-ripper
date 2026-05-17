@@ -103,8 +103,8 @@ async function init(): Promise<void> {
     if (message.type === 'task') {
       const {taskId, filePath} = message;
       try {
-        await handler(filePath, workerArgs);
-        parentPort!.postMessage({type: 'task_done', taskId, filePath});
+        const result = await handler(filePath, workerArgs);
+        parentPort!.postMessage({type: 'task_done', taskId, filePath, result});
       } catch (err: any) {
         // Serialize the error to avoid DataCloneError if user throws a non-cloneable object
         const safeError = err instanceof Error

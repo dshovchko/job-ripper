@@ -20,9 +20,9 @@ Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmar
 
 | Approach | Mean time | vs. single-thread |
 |---|---|---|
-| `xargs` (process per file) | 31.9 s | 21× slower |
+| `xargs` (process per file) | 32 s | 20× slower |
 | Single-threaded loop | 9.4 s | baseline |
-| **job-ripper** (`find \|`) | **1.5 s** | **6× faster** |
+| **job-ripper** | **1.6 s** | **6× faster** |
 
 **Concurrency starting point:** 75–100% of cores for CPU-bound tasks, 50–75% for mixed
 workloads, 25% for light ones. For nearly pure I/O, 1–2 workers is enough —
@@ -86,7 +86,7 @@ export default async function(filePath) {
 ```bash
 $ jori "src/**/*.js" -w compress.mjs -c 50%
 
-Using concurrency: 8
+Using concurrency: 6
 
 --- Processing Complete ---
 Total files: 312
@@ -156,8 +156,8 @@ Options:
 | Value | Meaning |
 |---|---|
 | `4` | Exactly 4 workers |
-| `75%` | 75 % of logical CPU cores (rounded down, min 1) |
-| _(omitted)_ | Same as `75%` |
+| `50%` | 50 % of logical CPU cores (rounded down, min 1) |
+| _(omitted)_ | Default as `75%` |
 
 ### Glob mode
 
@@ -182,9 +182,13 @@ cat file-list.txt              | jori -w process.mjs -c 4
 A worker is any ESM module that exports a `default` function:
 
 ```ts
-export default async function(filePath: string, args: string[]): Promise<void> {
-  // filePath — absolute path to the file to process
-  // args     — forwarded from CLI: jori ... -- --flag value
+/**
+ * @param filePath - Absolute path to the file to process.
+ * @param args - Extra arguments forwarded from CLI: `jori ... -- --flag value`.
+ * @returns Optional value forwarded to `onSuccess(filePath, result)` in the programmatic API.
+ */
+export default async function(filePath: string, args: string[]): Promise<unknown> {
+  // ...
 }
 ```
 
@@ -211,7 +215,7 @@ export default async function(filePath) {
 | What you do | What jori does |
 |---|---|
 | `throw new Error(...)` | Counts as **failed**, logged to stderr in verbose mode (`-v`), continues with remaining files |
-| Return normally | Counts as **success** |
+| Return normally | Counts as **success**; return value is forwarded to `onSuccess` in the programmatic API |
 | Module has no default export | Fatal error — run stops immediately with a clear message |
 | Module file not found | Fatal error — run stops immediately |
 
@@ -285,6 +289,8 @@ export default async function(filePath, args) {
 
 ## Programmatic API
 
+> **CLI vs Programmatic API:** The CLI prints each processed file path to stdout and ignores worker return values — it is designed for pipelines where the output is a stream of file paths. If your workers compute results that you need to collect (hashes, metadata, transformed data), use the programmatic API: the `onSuccess(filePath, result)` callback receives whatever the worker function returns.
+
 ```ts
 import { processFiles } from 'job-ripper';
 
@@ -294,7 +300,7 @@ const result = await processFiles({
   concurrency: 4,                 // optional, default: cpus × 0.75
   workerArgs: ['--strict'],       // forwarded to worker as args[]
   dryRun: false,                  // skip actual processing
-  onSuccess: (f) => console.log('✓', f),
+  onSuccess: (f, result) => console.log('✓', f, result),
   onTaskError: (f, err) => console.error('✗', f, err.message),
 });
 
@@ -303,6 +309,29 @@ console.log(result);
 ```
 
 The `files` parameter accepts **any iterable or async iterable** — arrays, generators, `fast-glob` streams, `fdir` crawlers, database cursors, etc.
+
+**Returning values from workers:** When your worker function returns a value, it is serialized via `postMessage` (structured clone) and forwarded as the second argument of `onSuccess(filePath, result)`. Keep returned values small and structured-clone-compatible; large objects add IPC overhead.
+
+```ts
+// hash-worker.mjs
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+
+export default async function(filePath) {
+  const hash = createHash('sha256').update(readFileSync(filePath)).digest('hex');
+  return { filePath, hash };
+}
+
+// main.mjs
+const hashes = [];
+await processFiles({
+  files: ['a.bin', 'b.bin'],
+  workerPath: './hash-worker.mjs',
+  onSuccess: (filePath, result) => hashes.push(result),
+});
+console.log(hashes);
+// [{ filePath: '/abs/a.bin', hash: '3e2b...' }, { filePath: '/abs/b.bin', hash: 'f1a0...' }]
+```
 
 **Error handling:** Task-level errors (throws inside your worker function) are counted and surfaced via `onTaskError` if provided, otherwise silent. They are reflected in `result.failed`. Check that field after the call and decide what to do:
 

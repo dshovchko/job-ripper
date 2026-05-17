@@ -22,8 +22,8 @@ interface FatalPoolErrorState {
 
 /** Pair of callbacks invoked after each task settles. */
 interface TaskHandlers {
-  /** Called when a worker finishes a file successfully. */
-  onSuccess: (filePath: string) => void;
+  /** Called when a worker finishes a file successfully, with the worker's return value. */
+  onSuccess: (filePath: string, result?: unknown) => void;
   /** Called when a worker fails to process a file. */
   onTaskError: (filePath: string, error: Error) => void;
 }
@@ -42,8 +42,8 @@ export interface ProcessOptions {
   workerArgs?: string[];
   /** When `true`, files are resolved and counted but no workers are spawned. */
   dryRun?: boolean;
-  /** Called after a file is processed successfully. */
-  onSuccess?: (filePath: string) => void;
+  /** Called after a file is processed successfully. Receives the file path and the worker's return value. */
+  onSuccess?: (filePath: string, result?: unknown) => void;
   /** Called when a worker fails to process a file. */
   onTaskError?: (filePath: string, error: Error) => void;
 }
@@ -115,8 +115,8 @@ function createTaskPromise(
   fatalPoolErrorState: FatalPoolErrorState
 ): Promise<void> {
   return pool.execute(filePath).then(
-    () => {
-      handlers.onSuccess(filePath);
+    (result: unknown) => {
+      handlers.onSuccess(filePath, result);
     },
     (err: unknown) => {
       const fatalPoolError = fatalPoolErrorState.current;
@@ -156,7 +156,7 @@ async function handleDryRun(options: ProcessOptions, startTime: number): Promise
   for await (const file of options.files) {
     if (!file) continue;
     total++;
-    if (options.onSuccess) options.onSuccess(resolve(file));
+    if (options.onSuccess) options.onSuccess(resolve(file), undefined);
   }
   return {total, success: total, failed: 0, durationMs: Date.now() - startTime, concurrency: calcConcurrency(options.concurrency)};
 }
@@ -171,9 +171,9 @@ async function handleDryRun(options: ProcessOptions, startTime: number): Promise
  */
 function getTaskHandlers(options: ProcessOptions, state: {success: number, failed: number}): TaskHandlers {
   return {
-    onSuccess: (filePath: string): void => {
+    onSuccess: (filePath: string, result: unknown): void => {
       state.success++;
-      if (options.onSuccess) options.onSuccess(filePath);
+      if (options.onSuccess) options.onSuccess(filePath, result);
     },
     onTaskError: (filePath: string, error: Error): void => {
       state.failed++;

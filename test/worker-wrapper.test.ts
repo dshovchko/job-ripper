@@ -12,6 +12,8 @@ const wrapperUrl = new URL('../dist/worker-wrapper.js', import.meta.url);
 const fixturesDir = join(__dirname, 'fixtures-wrapper');
 const validWorker = join(fixturesDir, 'valid.mjs');
 const noDefaultWorker = join(fixturesDir, 'no-default.mjs');
+const returningWorker = join(fixturesDir, 'returning.mjs');
+const voidWorker = join(fixturesDir, 'void.mjs');
 
 function runWrapper(scriptPath: string): {worker: Worker, messages: any[], errors: any[]} {
   const worker = new Worker(wrapperUrl, {
@@ -87,7 +89,8 @@ describe('Worker Wrapper', () => {
     expect(finishMsg).toEqual({
       type: 'task_done',
       taskId: 1,
-      filePath: 'test.txt'
+      filePath: 'test.txt',
+      result: 'ok'
     });
 
     await worker.terminate();
@@ -111,5 +114,33 @@ describe('Worker Wrapper', () => {
     expect(failMsg.type).toBe('fatal');
     expect(failMsg.error.message).toContain('must export a default function');
     expect(await waitForExit(worker)).toBe(1);
+  });
+
+  it('5. should include worker return value in task_done message', async () => {
+    const {worker, messages} = runWrapper(returningWorker);
+    await waitForMessage(worker, messages); // wait for ready
+
+    worker.postMessage({type: 'task', taskId: 1, filePath: 'test.txt'});
+
+    const finishMsg = await waitForMessage(worker, messages);
+    expect(finishMsg.type).toBe('task_done');
+    expect(finishMsg.taskId).toBe(1);
+    expect(finishMsg.filePath).toBe('test.txt');
+    expect(finishMsg.result).toEqual({transformed: 'test.txt', size: 42});
+
+    await worker.terminate();
+  });
+
+  it('6. should include undefined result when worker returns nothing', async () => {
+    const {worker, messages} = runWrapper(voidWorker);
+    await waitForMessage(worker, messages); // wait for ready
+
+    worker.postMessage({type: 'task', taskId: 1, filePath: 'test.txt'});
+
+    const finishMsg = await waitForMessage(worker, messages);
+    expect(finishMsg.type).toBe('task_done');
+    expect(finishMsg.result).toBeUndefined();
+
+    await worker.terminate();
   });
 });

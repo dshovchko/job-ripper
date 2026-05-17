@@ -46,10 +46,11 @@ describe('ThreadPool', () => {
 
   it('processing using a worker works', async () => {
     const pool = new ThreadPool({userWorkerPath: dummyWorkerPath, concurrency: 2});
-    await pool.execute(join(fixturesDir, 'test.txt'));
-    await pool.execute(join(fixturesDir, 'test2.txt'));
+    const result1 = await pool.execute(join(fixturesDir, 'test.txt'));
+    const result2 = await pool.execute(join(fixturesDir, 'test2.txt'));
     await pool.close();
-    expect(true).toBe(true); // if it reaches here, execute resolved
+    expect(result1).toContain('test.txt');
+    expect(result2).toContain('test2.txt');
   });
 
   it('error propagates', async () => {
