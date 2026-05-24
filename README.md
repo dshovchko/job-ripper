@@ -24,8 +24,8 @@ Full results across Intel Core Ultra 7 155U and AMD EPYC 9645 — see [`benchmar
 | Single-threaded loop | 9.4 s | baseline |
 | **job-ripper** | **1.6 s** | **6× faster** |
 
-**Concurrency starting point:** 75–100% of cores for CPU-bound tasks, 50–75% for mixed
-workloads, 25% for light ones. For nearly pure I/O, 1–2 workers is enough —
+**Concurrency starting point:** 75-100% of cores for CPU-bound tasks, 50-75% for mixed
+workloads, 15-25% for light ones. For nearly pure I/O, 1-2 workers is enough —
 the worker still unblocks the main thread even without parallelism.
 
 Run your own baseline and read the full analysis in [`benchmarks/README.md`](https://github.com/dshovchko/job-ripper/tree/main/benchmarks/README.md):
@@ -125,7 +125,7 @@ That's it. No config files, no `require()` wrappers, no callbacks.
 - Workers are pre-spawned once at startup (warm pool — no per-file overhead).
 - The main thread reads files and dispatches tasks; it never runs user code.
 - An internal queue with backpressure prevents the in-memory task list from growing unbounded on slow workers.
-- **Task-level errors** (`throw` inside your function) are counted as failures but processing continues for remaining files.
+- **Task-level errors** (`throw` inside your function) are counted as failures and printed to stderr; processing always continues for remaining files. By default the process exits with code `1` if any task failed. Pass `-k` / `--keep-going` to exit `0` instead.
 - **Fatal errors** (worker crash, module not found, missing default export) halt the entire run immediately with a clear message.
 
 ---
@@ -146,7 +146,8 @@ Options:
   -w, --worker <path>    Path to the worker script (required)
   -c, --concurrency <N>  Number of workers or CPU percentage (e.g., 4 or 75%, default: 75%)
   -v, --verbose          Print each processed file and detailed statistics
-  -s, --silent           Suppress all output except errors
+  -s, --silent           Suppress all non-fatal output (including worker error messages)
+  -k, --keep-going       Exit 0 even if some tasks failed (default: exit 1 on any failure)
   --dry-run              Print matched files without running workers
   -h, --help             Show this help message
 ```
@@ -214,7 +215,7 @@ export default async function(filePath) {
 
 | What you do | What jori does |
 |---|---|
-| `throw new Error(...)` | Counts as **failed**, logged to stderr in verbose mode (`-v`), continues with remaining files |
+| `throw new Error(...)` | Counts as **failed**, printed to stderr by default (suppressed with `--silent`). By default the process exits with code `1` after all files are processed. With `-k` / `--keep-going` the run finishes normally and exits `0`. |
 | Return normally | Counts as **success**; return value is forwarded to `onSuccess` in the programmatic API |
 | Module has no default export | Fatal error — run stops immediately with a clear message |
 | Module file not found | Fatal error — run stops immediately |
@@ -375,8 +376,8 @@ export default async function(filePath) {
 | Task weight | Computation per file | Recommended `-c` |
 |---|---|---|
 | **Light** | < 10 ms (JSON parse, regex) | `25%` — tasks finish faster than IPC overhead; extra workers mostly idle |
-| **Medium** | 10–200 ms (transpile, lint) | `50–75%` *(default 75%)* |
-| **Heavy** | > 200 ms (image encode, PDF) | `75–100%` — long tasks justify saturating every core |
+| **Medium** | 10-200 ms (transpile, lint) | `50-75%` *(default 75%)* |
+| **Heavy** | > 200 ms (image encode, PDF) | `75-100%` — long tasks justify saturating every core |
 | **I/O-bound** | network / disk limited | use `p-limit`, not jori |
 
 > **Why does lighter work need fewer workers?** When each task completes in < 10 ms the bottleneck shifts from CPU to the IPC round-trip between the main thread and workers. Spawning more workers than tasks can be dispatched adds synchronization noise without adding throughput. For heavy tasks the opposite is true — each thread stays busy for hundreds of milliseconds, so every extra core translates directly into lower wall time.

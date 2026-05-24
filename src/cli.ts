@@ -18,6 +18,34 @@ import {processFiles} from './index.js';
 /** High-resolution timestamp captured at module load, used to measure total wall-clock time. */
 const GLOBAL_START = performance.now();
 
+/**
+ * Returns an ANSI escape sequence only when stderr is a real TTY.
+ * When output is piped or redirected, returns an empty string so logs stay clean.
+ */
+const c = {
+  red:    process.stderr.isTTY ? '\x1b[31m'    : '',
+  yellow: process.stderr.isTTY ? '\x1b[33m'    : '',
+  reset:  process.stderr.isTTY ? '\x1b[0m'     : ''
+};
+
+/**
+ * Formats a worker task failure for stderr output.
+ *
+ * Prints `[FAIL] <filePath>:` on the first line (with red `[FAIL]` when a TTY),
+ * then the full error (stack when available) indented on the following lines.
+ *
+ * @param filePath - The file that caused the failure.
+ * @param error - The error thrown by the worker.
+ */
+function formatTaskError(filePath: string, error: Error): string {
+  const header = `${c.red}[FAIL]${c.reset} ${filePath}:`;
+  const detail = (error.stack ?? String(error))
+    .split('\n')
+    .map((line) => `  ${c.yellow}${line}${c.reset}`)
+    .join('\n');
+  return `${header}\n${detail}`;
+}
+
 /** Options passed to {@link runProcessing} that control the processing pipeline. */
 interface RunOptions {
   /** Async iterable that yields file paths to process. */
@@ -28,14 +56,18 @@ interface RunOptions {
   concurrency?: number;
   /** When `true`, matched files are printed but no workers are spawned. */
   dryRun: boolean;
-  /** When `true`, enables per-file status output and detailed statistics. */
-  verbose: boolean;
   /** Extra arguments forwarded to every worker (everything after `--`). */
   workerArgs: string[];
   /** Whether to print summary statistics after processing completes. */
   shouldShowStats: boolean;
   /** Whether to print each successfully processed file path to stdout. */
   shouldPrintFiles: boolean;
+  /** When `true`, all non-fatal output is suppressed (statistics, file paths, worker error messages). Fatal errors are still printed.
+   * Note: `shouldShowStats` and `shouldPrintFiles` are derived from this flag before `runProcessing` is called;
+   * inside `runProcessing` it is used only to gate worker error logging. */
+  silent: boolean;
+  /** When `true`, worker errors are counted but do not abort the run. When `false` (default), the process exits with code 1 if any worker fails. */
+  keepGoing: boolean;
 }
 
 /**
@@ -148,7 +180,8 @@ Options:
   -w, --worker <path>    Path to the worker script (required)
   -c, --concurrency <N>  Number of workers or CPU percentage (e.g., 4 or 50%, default: 75%)
   -v, --verbose          Print each processed file and detailed statistics
-  -s, --silent           Suppress all output except errors
+  -s, --silent           Suppress all non-fatal output (including worker error messages)
+  -k, --keep-going       Exit 0 even if some tasks failed (default: exit 1 on any failure)
   --dry-run              Print matched files without running workers
   -h, --help             Show this help message
 
@@ -217,6 +250,10 @@ function parseCliArgs() {
       },
       'dry-run': {
         type: 'boolean'
+      },
+      'keep-going': {
+        type: 'boolean',
+        short: 'k'
       }
     },
     allowPositionals: true
@@ -237,7 +274,7 @@ function parseCliArgs() {
  */
 function extractArguments(): {
   pattern: string; workerFile: string; concurrency: number | undefined;
-  isDrawnFromStdin: boolean; dryRun: boolean; verbose: boolean; silent: boolean; workerArgs: string[]; showHelp: boolean;
+  isDrawnFromStdin: boolean; dryRun: boolean; verbose: boolean; silent: boolean; keepGoing: boolean; workerArgs: string[]; showHelp: boolean;
 } {
   const {parsed: {values, positionals}, workerArgs} = parseCliArgs();
 
@@ -280,6 +317,7 @@ function extractArguments(): {
     dryRun: !!values['dry-run'],
     verbose: !!values.verbose,
     silent: !!values.silent,
+    keepGoing: !!values['keep-going'],
     workerArgs,
     showHelp: !!values.help
   };
@@ -289,11 +327,11 @@ function extractArguments(): {
  * Prints a summary of the processing run to stderr.
  *
  * @param result - Aggregated counters and timing information:
- *   `total` – number of files processed,
- *   `success` – files processed successfully,
- *   `failed` – files that failed,
- *   `durationMs` – wall-clock duration in milliseconds,
- *   `concurrency` – number of concurrent workers used.
+ *   `total` - number of files processed,
+ *   `success` - files processed successfully,
+ *   `failed` - files that failed,
+ *   `durationMs` - wall-clock duration in milliseconds,
+ *   `concurrency` - number of concurrent workers used.
  */
 function printStatistics(result: {
   total: number; success: number; failed: number; durationMs: number; concurrency: number;
@@ -363,9 +401,11 @@ async function runProcessing(opts: RunOptions): Promise<void> {
     onSuccess: (filePath): void => {
       if (opts.shouldPrintFiles) console.log(filePath);
     },
-    onTaskError: opts.verbose ? (filePath, error): void => {
-      console.error(`[FAIL] ${filePath}: ${error.message}`);
-    } : undefined
+    onTaskError: (filePath, error): void => {
+      if (!opts.silent) {
+        console.error(formatTaskError(filePath, error));
+      }
+    }
   });
 
   if (opts.shouldShowStats && result.total > 0) {
@@ -373,6 +413,11 @@ async function runProcessing(opts: RunOptions): Promise<void> {
     printStatistics(result);
   } else if (opts.shouldShowStats && result.total === 0) {
     console.error('No files found to process.');
+  }
+
+  if (!opts.keepGoing && result.failed > 0) {
+    safeExit(1);
+    return;
   }
 
   safeExit(0);
@@ -387,7 +432,7 @@ async function runProcessing(opts: RunOptions): Promise<void> {
  * code.
  */
 async function main(): Promise<void> {
-  const {pattern, workerFile, concurrency, isDrawnFromStdin, dryRun, verbose, silent, workerArgs, showHelp} = extractArguments();
+  const {pattern, workerFile, concurrency, isDrawnFromStdin, dryRun, verbose, silent, keepGoing, workerArgs, showHelp} = extractArguments();
 
   if (showHelp || !workerFile || (!pattern && !isDrawnFromStdin)) {
     showUsage();
@@ -402,7 +447,7 @@ async function main(): Promise<void> {
     : collectFiles(pattern);
 
   try {
-    await runProcessing({filesStream, workerFile, concurrency, dryRun, verbose, workerArgs, shouldShowStats, shouldPrintFiles});
+    await runProcessing({filesStream, workerFile, concurrency, dryRun, silent, keepGoing, workerArgs, shouldShowStats, shouldPrintFiles});
   } catch (err: any) {
     if (err && err.isConfigError) {
       console.error(`\n[Fatal Error]: ${err.message}`);
