@@ -294,14 +294,14 @@ Every scenario runs the same task eleven ways:
 
 `job-ripper` is worth using across all workload types, not just CPU-heavy ones.
 
-**CPU-bound tasks** (`compress-hash-js`, `md-to-html`) show the clearest wins: ~20× faster than `xargs` and consistently ahead of single-thread at any concurrency level. Set concurrency to **75–100% of available cores**.
+**CPU-bound tasks** (`compress-hash-js`, `md-to-html`) show the clearest wins: ~20× faster than `xargs` and consistently ahead of single-thread at any concurrency level. Set concurrency to **75-100% of available cores**.
 
 **Mixed workloads** (`validate-json` at moderate concurrency) still benefit, though the margin
-narrows as the task gets lighter. Set concurrency to **50–75% of available cores**.
+narrows as the task gets lighter. Set concurrency to **50-75% of available cores**.
 
 **I/O-light or fast tasks** (e.g. `validate-json`) show near-parity between `job-ripper` and
 single-thread at low concurrency — the difference is within noise. Even so, using `job-ripper`
-with **1–2 workers** costs nothing measurable while keeping the architecture consistent and
+with **1-2 workers** costs nothing measurable while keeping the architecture consistent and
 ready to scale when task weight grows.
 
 **CI environments** (GitHub Actions free tier: 2 cores, GitLab shared: 2 cores) are a good
@@ -312,7 +312,7 @@ continues I/O dispatch. Overhead is negligible; isolation benefit is real.
 
 | Workload | Recommended concurrency |
 |---|---|
-| CPU-bound (compression, rendering) | 75–100% of cores |
-| Mixed (validation, transformation) | 50–75% of cores |
-| I/O-light / fast tasks | 1–2 workers |
-| CI / GitHub Actions (any workload) | 1–2 workers |
+| CPU-bound (compression, rendering) | 75-100% of cores |
+| Mixed (validation, transformation) | 50-75% of cores |
+| I/O-light / fast tasks | 1-2 workers |
+| CI / GitHub Actions (any workload) | 1-2 workers |

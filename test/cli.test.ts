@@ -70,11 +70,16 @@ describe('CLI Integration', () => {
     expect(stderr).toContain('Processing Complete');
   });
 
-  it('4. --silent mode: no output at all', async () => {
+  it('4. --silent mode: no output at all, even on worker error', async () => {
     const input = join(fixturesDir, '1.txt');
-    const {stdout, stderr} = await execAsync(`node ${cliPath} "${input}" -w "${workerPath}" --silent`);
-    expect(stdout.trim()).toBe('');
-    expect(stderr.trim()).toBe('');
+    // Success worker: fully silent
+    const r1 = await execAsync(`node ${cliPath} "${input}" -w "${workerPath}" --silent`);
+    expect(r1.stdout.trim()).toBe('');
+    expect(r1.stderr.trim()).toBe('');
+    // Fail worker + keep-going: [FAIL] also suppressed by --silent
+    const r2 = await execAsync(`node ${cliPath} "${input}" -w "${failWorkerPath}" --silent --keep-going`);
+    expect(r2.stdout.trim()).toBe('');
+    expect(r2.stderr.trim()).toBe('');
   });
 
   it('5. interactive-like mode with --verbose', async () => {
@@ -136,5 +141,31 @@ describe('CLI Integration', () => {
       // Ensure no stack trace lines are printed for this user error
       expect(err.stderr).not.toContain('    at checkOptionUsage');
     }
+  });
+
+  it('11. worker error causes exit code 1 by default and prints [FAIL] to stderr', async () => {
+    const input = join(fixturesDir, '1.txt');
+    try {
+      await execAsync(`node ${cliPath} "${input}" -w "${failWorkerPath}"`);
+      expect.fail('Should have thrown an error');
+    } catch (err: any) {
+      if (err.name === 'AssertionError') throw err;
+      expect(err.code).toBe(1);
+      expect(err.stderr).toContain('[FAIL]');
+      expect(err.stderr).toContain('fail');
+    }
+  });
+
+  it('12. --keep-going: worker errors do not abort, exits 0', async () => {
+    const input = join(fixturesDir, '1.txt');
+    const {stdout, stderr} = await execAsync(`node ${cliPath} "${input}" -w "${failWorkerPath}" --keep-going --verbose`);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toMatch(/Failed:\s+1/);
+  });
+
+  it('13. -k shorthand: same as --keep-going', async () => {
+    const input = join(fixturesDir, '1.txt');
+    const result = await execAsync(`node ${cliPath} "${input}" -w "${failWorkerPath}" -k --verbose`);
+    expect(result.stderr).toMatch(/Failed:\s+1/);
   });
 });
