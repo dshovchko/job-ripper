@@ -59,7 +59,9 @@ Spawning 8 workers to read 8 files simultaneously won't help if your bottleneck 
 ```bash
 npm install -g job-ripper          # global CLI
 # or
-npm install job-ripper             # local, for programmatic use (see API section)
+npm install job-ripper             # local, for programmatic use in production (see API section)
+# or
+npm install --save-dev job-ripper  # local, for use in build scripts / dev tooling only
 ```
 
 Requires **Node.js ≥ 22**.
