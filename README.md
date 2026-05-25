@@ -10,6 +10,36 @@ Feed it a file list. Give it a worker script. Chain workers like Unix pipes. It 
 
 ---
 
+## Table of Contents
+
+- [job-ripper (jori)](#job-ripper-jori)
+  - [Table of Contents](#table-of-contents)
+  - [Benchmarks](#benchmarks)
+  - [When to use](#when-to-use)
+  - [Install](#install)
+  - [Quick Start](#quick-start)
+  - [How it works](#how-it-works)
+  - [Usage](#usage)
+    - [CLI](#cli)
+    - [Glob mode](#glob-mode)
+    - [Stdin / pipeline mode](#stdin--pipeline-mode)
+  - [Worker Contract](#worker-contract)
+  - [Examples](#examples)
+    - [Pipeline chain (Unix pipes)](#pipeline-chain-unix-pipes)
+    - [With `find`, `fdir`, or `fast-glob`](#with-find-fdir-or-fast-glob)
+    - [Dry-run before a destructive operation](#dry-run-before-a-destructive-operation)
+    - [Pass arguments to the worker](#pass-arguments-to-the-worker)
+  - [Programmatic API](#programmatic-api)
+  - [Performance Tips](#performance-tips)
+    - [Prefer sync APIs inside worker bodies](#prefer-sync-apis-inside-worker-bodies)
+    - [Pick concurrency for your task weight](#pick-concurrency-for-your-task-weight)
+    - [Keep the main thread free](#keep-the-main-thread-free)
+    - [Pipeline tuning](#pipeline-tuning)
+    - [Always preview with `--dry-run`](#always-preview-with---dry-run)
+    - [File discovery: glob vs. `find` on different platforms](#file-discovery-glob-vs-find-on-different-platforms)
+
+---
+
 ## Benchmarks
 
 Benchmark scenario: process files from `node_modules` across three workload profiles
@@ -70,13 +100,15 @@ Requires **Node.js ≥ 22**.
 
 ## Quick Start
 
+> ⚠️ **Security note:** Only run workers you trust. A worker script executes with full Node.js privileges and can read or modify any file the running user has access to. Review third-party code before use.
+
 **1. Write a worker** (`compress.mjs`):
 
 ```js
 import { gzipSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-export default async function(filePath) {
+export default async function(filePath, _args) {
   const data = readFileSync(filePath);
   const compressed = gzipSync(data);
   writeFileSync(filePath + '.gz', compressed);
