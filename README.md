@@ -20,23 +20,10 @@ Feed it a file list. Give it a worker script. Chain workers like Unix pipes. It 
   - [Quick Start](#quick-start)
   - [How it works](#how-it-works)
   - [Usage](#usage)
-    - [CLI](#cli)
-    - [Glob mode](#glob-mode)
-    - [Stdin / pipeline mode](#stdin--pipeline-mode)
   - [Worker Contract](#worker-contract)
   - [Examples](#examples)
-    - [Pipeline chain (Unix pipes)](#pipeline-chain-unix-pipes)
-    - [With `find`, `fdir`, or `fast-glob`](#with-find-fdir-or-fast-glob)
-    - [Dry-run before a destructive operation](#dry-run-before-a-destructive-operation)
-    - [Pass arguments to the worker](#pass-arguments-to-the-worker)
   - [Programmatic API](#programmatic-api)
   - [Performance Tips](#performance-tips)
-    - [Prefer sync APIs inside worker bodies](#prefer-sync-apis-inside-worker-bodies)
-    - [Pick concurrency for your task weight](#pick-concurrency-for-your-task-weight)
-    - [Keep the main thread free](#keep-the-main-thread-free)
-    - [Pipeline tuning](#pipeline-tuning)
-    - [Always preview with `--dry-run`](#always-preview-with---dry-run)
-    - [File discovery: glob vs. `find` on different platforms](#file-discovery-glob-vs-find-on-different-platforms)
 
 ---
 
