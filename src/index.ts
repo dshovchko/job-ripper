@@ -49,6 +49,30 @@ export interface ProcessOptions {
 }
 
 /**
+ * Per-worker utilization metrics.
+ */
+export interface WorkerMetrics {
+  /** Event loop utilization (0–1): fraction of time the worker's event loop was active. */
+  utilization: number;
+}
+
+/**
+ * Aggregated pool metrics collected after the run completes.
+ */
+export interface PoolMetrics {
+  /** Per-worker metrics (indexed by worker spawn order). */
+  workers: WorkerMetrics[];
+  /** Summary statistics across all workers. */
+  summary: {
+    avgUtilization: number;
+    minUtilization: number;
+    maxUtilization: number;
+    /** Difference between max and min utilization (0–1). */
+    spread: number;
+  };
+}
+
+/**
  * Summary returned by {@link processFiles} after all work is done.
  */
 export interface ProcessResult {
@@ -62,6 +86,8 @@ export interface ProcessResult {
   durationMs: number;
   /** Actual concurrency level that was used. */
   concurrency: number;
+  /** Worker utilization metrics. */
+  metrics: PoolMetrics;
 }
 
 /**
@@ -158,7 +184,11 @@ async function handleDryRun(options: ProcessOptions, startTime: number): Promise
     total++;
     if (options.onSuccess) options.onSuccess(resolve(file), undefined);
   }
-  return {total, success: total, failed: 0, durationMs: Date.now() - startTime, concurrency: calcConcurrency(options.concurrency)};
+  return {
+    total, success: total, failed: 0,
+    durationMs: Date.now() - startTime, concurrency: calcConcurrency(options.concurrency),
+    metrics: {workers: [], summary: {avgUtilization: 0, minUtilization: 0, maxUtilization: 0, spread: 0}}
+  };
 }
 
 /**
@@ -212,7 +242,10 @@ export async function processFiles(options: ProcessOptions): Promise<ProcessResu
   if (options.dryRun) return handleDryRun(options, startTime);
 
   let total = 0;
-  const pool = new ThreadPool({userWorkerPath: resolve(options.workerPath), concurrency: options.concurrency, workerArgs: options.workerArgs});
+  const pool = new ThreadPool({
+    userWorkerPath: resolve(options.workerPath), concurrency: options.concurrency,
+    workerArgs: options.workerArgs
+  });
   const inFlightTasks = new Set<Promise<void>>();
   const fatalErr: FatalPoolErrorState = {};
   const poolErr = createPoolErrorPromise(pool, (err) => {
@@ -250,11 +283,9 @@ export async function processFiles(options: ProcessOptions): Promise<ProcessResu
     }
 
     return {
-      total,
-      success: stats.success,
-      failed: stats.failed,
-      durationMs: Date.now() - startTime,
-      concurrency: pool.concurrency
+      total, success: stats.success, failed: stats.failed,
+      durationMs: Date.now() - startTime, concurrency: pool.concurrency,
+      metrics: pool.collectMetrics()
     };
   } finally {
     await pool.close();

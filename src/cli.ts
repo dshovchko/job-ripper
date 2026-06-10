@@ -14,6 +14,7 @@ import {pathToFileURL} from 'node:url';
 import {performance} from 'node:perf_hooks';
 import * as fs from 'node:fs/promises';
 import {processFiles} from './index.js';
+import type {PoolMetrics} from './index.js';
 
 /** High-resolution timestamp captured at module load, used to measure total wall-clock time. */
 const GLOBAL_START = performance.now();
@@ -345,6 +346,22 @@ function printStatistics(result: {
 }
 
 /**
+ * Prints worker utilization metrics to stderr.
+ *
+ * @param metrics - Aggregated pool metrics from the processing run.
+ */
+function printMetrics(metrics: PoolMetrics): void {
+  const {summary} = metrics;
+
+  console.error('\n--- Worker Metrics ---');
+  const avg = (summary.avgUtilization * 100).toFixed(1);
+  const min = (summary.minUtilization * 100).toFixed(1);
+  const max = (summary.maxUtilization * 100).toFixed(1);
+  const spread = (summary.spread * 100).toFixed(1);
+  console.error(`  utilization:  avg=${avg}%  min=${min}%  max=${max}%  spread=${spread}pp`);
+}
+
+/**
  * Flushes both stdout and stderr before exiting the process.
  *
  * Prevents data loss when output is piped to another process that may
@@ -411,6 +428,9 @@ async function runProcessing(opts: RunOptions): Promise<void> {
   if (opts.shouldShowStats && result.total > 0) {
     result.durationMs = performance.now() - GLOBAL_START;
     printStatistics(result);
+    if (result.metrics.workers.length > 0) {
+      printMetrics(result.metrics);
+    }
   } else if (opts.shouldShowStats && result.total === 0) {
     console.error('No files found to process.');
   }

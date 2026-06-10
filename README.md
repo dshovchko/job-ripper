@@ -23,6 +23,7 @@ Feed it a file list. Give it a worker script. Chain workers like Unix pipes. It 
   - [Worker Contract](#worker-contract)
   - [Examples](#examples)
   - [Programmatic API](#programmatic-api)
+  - [Worker Metrics](#worker-metrics)
   - [Performance Tips](#performance-tips)
 
 ---
@@ -114,6 +115,9 @@ Total files: 312
 Success:     312
 Failed:      0
 Time:        2.41s
+
+--- Worker Metrics ---
+  utilization:  avg=88.8%  min=85.9%  max=92.5%  spread=6.6pp
 ```
 
 That's it. No config files, no `require()` wrappers, no callbacks.
@@ -327,7 +331,7 @@ const result = await processFiles({
 });
 
 console.log(result);
-// { total: 2, success: 2, failed: 0, durationMs: 310, concurrency: 4 }
+// { total: 2, success: 2, failed: 0, durationMs: 310, concurrency: 4, metrics: { ... } }
 ```
 
 The `files` parameter accepts **any iterable or async iterable** — arrays, generators, `fast-glob` streams, `fdir` crawlers, database cursors, etc.
@@ -368,6 +372,60 @@ if (result.failed > 0) {
   console.error(`${result.failed} files failed`);
   process.exit(1);
 }
+```
+
+---
+
+## Worker Metrics
+
+After a successful run, job-ripper displays worker utilization alongside the summary — how well the pool was loaded:
+
+```bash
+$ jori "src/**/*.ts" -w compile.mjs -c 8
+
+Using concurrency: 8
+
+--- Processing Complete ---
+Total files: 240
+Success:     240
+Failed:      0
+Time:        1.83s
+
+--- Worker Metrics ---
+  utilization:  avg=87.3%  min=82.1%  max=91.5%  spread=9.4pp
+```
+
+**What the numbers mean:**
+
+| Metric | Interpretation |
+|---|---|
+| `utilization` close to 100% | Workers are fully saturated — great for CPU-bound tasks |
+| `utilization` below 50% | Tasks are too light for this concurrency level — try fewer workers |
+| `spread` < 5 pp | Tasks are uniform — work is distributed evenly |
+| `spread` 5-15 pp | Normal. Some files are heavier (larger, more complex structure) |
+| `spread` > 15 pp | Strong imbalance. A "monster file" near the end kept one worker busy while others finished, or too many workers for the number of files |
+
+> `pp` = percentage points — the absolute difference between two percentages.
+
+**How it works:** Uses Node.js `worker.performance.eventLoopUtilization()` — a zero-cost read from SharedArrayBuffer. Snapshots are taken only at pool creation and after all work completes. **Zero overhead** is added to the dispatch loop, message handling, or worker execution path.
+
+### Programmatic API
+
+`result.metrics` is always available:
+
+```ts
+import { processFiles } from 'job-ripper';
+
+const result = await processFiles({
+  files: myFiles,
+  workerPath: './worker.mjs',
+});
+
+console.log(`Avg utilization: ${(result.metrics.summary.avgUtilization * 100).toFixed(1)}%`);
+// Per-worker breakdown:
+result.metrics.workers.forEach((w, i) => {
+  console.log(`  Worker ${i}: ${(w.utilization * 100).toFixed(1)}%`);
+});
 ```
 
 ---
