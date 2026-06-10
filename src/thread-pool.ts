@@ -8,7 +8,10 @@
 import {Worker} from 'node:worker_threads';
 import {EventEmitter} from 'node:events';
 import {cpus} from 'node:os';
+
 import {FastQueue} from './fast-queue.js';
+
+import type {EventLoopUtilization} from 'node:perf_hooks';
 
 /**
  * Configuration for creating a {@link ThreadPool}.
@@ -91,6 +94,9 @@ export class ThreadPool extends EventEmitter {
   private pendingEnqueues = 0;
   private terminationPromise: Promise<void> | null = null;
 
+  /** ELU baseline snapshots captured at pool creation (one per worker). */
+  private eluBaselines: EventLoopUtilization[];
+
   /**
    * Creates a new thread pool and spawns the worker threads.
    *
@@ -128,6 +134,9 @@ export class ThreadPool extends EventEmitter {
       this.workers.push(worker);
       this.freeWorkers.push(worker);
     }
+
+    // Capture ELU baselines after all workers are spawned
+    this.eluBaselines = this.workers.map((w) => w.performance.eventLoopUtilization());
   }
 
   /**
@@ -318,6 +327,38 @@ export class ThreadPool extends EventEmitter {
     if (this.listenerCount('error') > 0) {
       this.emit('error', err);
     }
+  }
+
+  /**
+   * Collects worker utilization metrics.
+   *
+   * Must be called **before** `close()` — once workers are terminated
+   * their performance data is no longer accessible.
+   *
+   * @returns Per-worker metrics and summary.
+   */
+  collectMetrics(): {
+    workers: {utilization: number}[];
+    summary: {avgUtilization: number, minUtilization: number, maxUtilization: number, spread: number};
+  } {
+    const workerMetrics = this.workers.map((w, i) => {
+      const elu = w.performance.eventLoopUtilization(this.eluBaselines[i]);
+      return {utilization: elu.utilization};
+    });
+
+    const utils = workerMetrics.map((m) => m.utilization);
+    const minUtilization = Math.min(...utils);
+    const maxUtilization = Math.max(...utils);
+
+    return {
+      workers: workerMetrics,
+      summary: {
+        avgUtilization: utils.reduce((a, b) => a + b, 0) / utils.length,
+        minUtilization,
+        maxUtilization,
+        spread: maxUtilization - minUtilization
+      }
+    };
   }
 
   /**

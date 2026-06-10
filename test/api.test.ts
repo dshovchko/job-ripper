@@ -216,4 +216,44 @@ describe('Programmatic API', () => {
     expect(results.length).toBe(1);
     expect(results[0].result).toBeUndefined();
   });
+
+  it('metrics.workers has one entry per worker and all utilization values are finite numbers in [0,1]', async () => {
+    const concurrency = 2;
+    const files = [
+      join(fixturesDir, 'a.txt'),
+      join(fixturesDir, 'b.txt'),
+      join(fixturesDir, 'c.txt')
+    ];
+
+    const res = await processFiles({files, workerPath: dummyWorkerPath, concurrency});
+
+    expect(res.metrics.workers.length).toBe(concurrency);
+
+    for (const w of res.metrics.workers) {
+      expect(Number.isFinite(w.utilization)).toBe(true);
+      expect(w.utilization).toBeGreaterThanOrEqual(0);
+      expect(w.utilization).toBeLessThanOrEqual(1);
+    }
+
+    const {summary} = res.metrics;
+    expect(Number.isFinite(summary.avgUtilization)).toBe(true);
+    expect(Number.isFinite(summary.minUtilization)).toBe(true);
+    expect(Number.isFinite(summary.maxUtilization)).toBe(true);
+    expect(Number.isFinite(summary.spread)).toBe(true);
+    expect(summary.spread).toBeGreaterThanOrEqual(0);
+  });
+
+  it('metrics is present and zeroed out on dry-run', async () => {
+    const res = await processFiles({
+      files: [join(fixturesDir, 'x.txt')],
+      workerPath: dummyWorkerPath,
+      dryRun: true
+    });
+
+    expect(res.metrics.workers).toHaveLength(0);
+    expect(res.metrics.summary.avgUtilization).toBe(0);
+    expect(res.metrics.summary.minUtilization).toBe(0);
+    expect(res.metrics.summary.maxUtilization).toBe(0);
+    expect(res.metrics.summary.spread).toBe(0);
+  });
 });
