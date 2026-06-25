@@ -156,17 +156,124 @@ function createTaskPromise(
 }
 
 /**
- * Adds a task promise to the in-flight set and arranges for it to
- * be removed automatically when it settles.
- *
- * @param inFlightTasks - The set of currently running task promises.
- * @param task - The task promise to track.
+ * Context shared with {@link runDispatchLoop}.
  */
-function trackTask(inFlightTasks: Set<Promise<void>>, task: Promise<void>): void {
-  const trackedTask = task.finally(() => {
-    inFlightTasks.delete(trackedTask);
-  });
-  inFlightTasks.add(trackedTask);
+interface DispatchContext {
+  /** The thread pool tasks are dispatched to. */
+  pool: ThreadPool;
+  /** Async iterator yielding file paths. */
+  iterator: AsyncIterator<string>;
+  /** Success/error callbacks. */
+  handlers: TaskHandlers;
+  /** Shared fatal-error holder. */
+  fatalErr: FatalPoolErrorState;
+  /** Promise that rejects on a fatal pool error. */
+  poolErr: Promise<never>;
+}
+
+/**
+ * Back-pressure gate providing O(1) coordination between the producer
+ * and the in-flight tasks.
+ */
+interface BackpressureGate {
+  /** Records that a task has been dispatched. */
+  add: () => void;
+  /** Marks a task as settled; wakes a blocked producer or drain waiter. */
+  release: () => void;
+  /** Returns a promise that resolves when a slot frees, or `null` if one is already free. */
+  acquire: () => Promise<unknown> | null;
+  /** Returns a promise that resolves when all tasks drain, or `null` if none are in flight. */
+  drain: () => Promise<unknown> | null;
+}
+
+/**
+ * Creates an {@link BackpressureGate}.
+ *
+ * Tracks in-flight count with a single counter and a lone reusable
+ * "slot freed" / "drained" signal, instead of racing over the whole set
+ * of in-flight promises on every file (which scaled with concurrency).
+ *
+ * @param limit - Maximum number of concurrently in-flight tasks.
+ * @param poolErr - Promise that rejects on a fatal pool error.
+ * @returns A gate the producer loop uses to apply back-pressure.
+ */
+function createBackpressureGate(limit: number, poolErr: Promise<never>): BackpressureGate {
+  let inFlight = 0;
+  let onSlotFree: (() => void) | null = null;
+  let onDrained: (() => void) | null = null;
+
+  return {
+    add: (): void => {
+      inFlight++;
+    },
+    release: (): void => {
+      inFlight--;
+      const wake = onSlotFree;
+      onSlotFree = null;
+      if (wake) wake();
+      if (inFlight === 0) {
+        const done = onDrained;
+        onDrained = null;
+        if (done) done();
+      }
+    },
+    acquire: (): Promise<unknown> | null => {
+      if (inFlight < limit) return null;
+      return Promise.race([new Promise<void>((r) => void (onSlotFree = r)), poolErr]);
+    },
+    drain: (): Promise<unknown> | null => {
+      if (inFlight === 0) return null;
+      return Promise.race([new Promise<void>((r) => void (onDrained = r)), poolErr]);
+    }
+  };
+}
+
+/**
+ * Drives the producer loop: pulls files from the iterator, dispatches
+ * each one to the pool, and applies O(1) back-pressure via a
+ * {@link BackpressureGate}.
+ *
+ * @param ctx - Pool, iterator, handlers and fatal-error plumbing.
+ * @returns The total number of files dispatched.
+ */
+async function runDispatchLoop(ctx: DispatchContext): Promise<number> {
+  const {pool, iterator, handlers, fatalErr, poolErr} = ctx;
+  const gate = createBackpressureGate(pool.concurrency, poolErr);
+  let total = 0;
+
+  const checkFatal = (): void => {
+    const fatal = fatalErr.current;
+    if (fatal) throw fatal;
+  };
+
+  try {
+    while (true) {
+      const result = await Promise.race([iterator.next(), poolErr]);
+      checkFatal();
+      if (result.done) break;
+      if (!result.value) continue;
+
+      gate.add();
+      createTaskPromise(pool, resolve(result.value), handlers, fatalErr).then(gate.release, gate.release);
+      total++;
+
+      const slot = gate.acquire();
+      if (slot) {
+        await slot;
+        checkFatal();
+      }
+    }
+
+    const draining = gate.drain();
+    if (draining) {
+      await draining;
+      checkFatal();
+    }
+  } finally {
+    if (typeof iterator.return === 'function') await iterator.return(undefined);
+  }
+
+  return total;
 }
 
 /**
@@ -241,12 +348,10 @@ export async function processFiles(options: ProcessOptions): Promise<ProcessResu
   const startTime = Date.now();
   if (options.dryRun) return handleDryRun(options, startTime);
 
-  let total = 0;
   const pool = new ThreadPool({
     userWorkerPath: resolve(options.workerPath), concurrency: options.concurrency,
     workerArgs: options.workerArgs
   });
-  const inFlightTasks = new Set<Promise<void>>();
   const fatalErr: FatalPoolErrorState = {};
   const poolErr = createPoolErrorPromise(pool, (err) => {
     fatalErr.current = err;
@@ -258,29 +363,7 @@ export async function processFiles(options: ProcessOptions): Promise<ProcessResu
     const handlers = getTaskHandlers(options, stats);
     const iterator = toAsyncIterator(options.files)[Symbol.asyncIterator]();
 
-    try {
-      while (true) {
-        const nextPromise = iterator.next();
-        const result = await Promise.race([nextPromise, poolErr]);
-        if (fatalErr.current) throw fatalErr.current;
-        if (result.done) break;
-
-        if (!result.value) continue;
-
-        trackTask(inFlightTasks, createTaskPromise(pool, resolve(result.value), handlers, fatalErr));
-        total++;
-
-        if (inFlightTasks.size >= pool.concurrency) {
-          await Promise.race([Promise.race(inFlightTasks), poolErr]);
-        }
-      }
-
-      if (inFlightTasks.size > 0) {
-        await Promise.race([Promise.all(inFlightTasks), poolErr]);
-      }
-    } finally {
-      if (typeof iterator.return === 'function') await iterator.return(undefined);
-    }
+    const total = await runDispatchLoop({pool, iterator, handlers, fatalErr, poolErr});
 
     return {
       total, success: stats.success, failed: stats.failed,
