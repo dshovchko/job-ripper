@@ -17,7 +17,6 @@ interface ThreadPoolInternals {
     size: number;
   };
   freeWorkers: unknown[];
-  activeTasks: number;
   pump: () => void;
 }
 
@@ -112,7 +111,6 @@ describe('ThreadPool', () => {
 
     internalPool.pump();
 
-    expect(internalPool.activeTasks).toBe(2);
     expect(internalPool.taskQueue.size).toBe(0);
     expect(internalPool.freeWorkers.length).toBe(0);
 
@@ -132,7 +130,7 @@ describe('ThreadPool', () => {
 
     expect(internalPool.capacityWaiters.size).toBe(1); // p3 is waiting
     expect(internalPool.taskQueue.size).toBe(1); // p2 is queued
-    expect(internalPool.activeTasks).toBe(1); // p1 is computing
+    expect(internalPool.freeWorkers.length).toBe(0); // p1 occupies the only worker
 
     // Now wait for everything to finish naturally
     await Promise.all([p1, p2, p3]);
@@ -140,7 +138,7 @@ describe('ThreadPool', () => {
     // Fast-verify unblocking occurred
     expect(internalPool.capacityWaiters.size).toBe(0);
     expect(internalPool.taskQueue.size).toBe(0);
-    expect(internalPool.activeTasks).toBe(0);
+    expect(internalPool.freeWorkers.length).toBe(1); // worker idle again
 
     await pool.close();
   });

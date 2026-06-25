@@ -83,13 +83,11 @@ describe('Worker Wrapper', () => {
     const {worker, messages} = runWrapper(validWorker);
     await waitForMessage(worker, messages); // wait for ready
 
-    worker.postMessage({type: 'task', taskId: 1, filePath: 'test.txt'});
+    worker.postMessage({type: 'task', filePath: 'test.txt'});
 
     const finishMsg = await waitForMessage(worker, messages);
     expect(finishMsg).toEqual({
       type: 'task_done',
-      taskId: 1,
-      filePath: 'test.txt',
       result: 'ok'
     });
 
@@ -120,12 +118,10 @@ describe('Worker Wrapper', () => {
     const {worker, messages} = runWrapper(returningWorker);
     await waitForMessage(worker, messages); // wait for ready
 
-    worker.postMessage({type: 'task', taskId: 1, filePath: 'test.txt'});
+    worker.postMessage({type: 'task', filePath: 'test.txt'});
 
     const finishMsg = await waitForMessage(worker, messages);
     expect(finishMsg.type).toBe('task_done');
-    expect(finishMsg.taskId).toBe(1);
-    expect(finishMsg.filePath).toBe('test.txt');
     expect(finishMsg.result).toEqual({transformed: 'test.txt', size: 42});
 
     await worker.terminate();
@@ -135,7 +131,7 @@ describe('Worker Wrapper', () => {
     const {worker, messages} = runWrapper(voidWorker);
     await waitForMessage(worker, messages); // wait for ready
 
-    worker.postMessage({type: 'task', taskId: 1, filePath: 'test.txt'});
+    worker.postMessage({type: 'task', filePath: 'test.txt'});
 
     const finishMsg = await waitForMessage(worker, messages);
     expect(finishMsg.type).toBe('task_done');
