@@ -161,14 +161,43 @@ function createTaskPromise(
 interface DispatchContext {
   /** The thread pool tasks are dispatched to. */
   pool: ThreadPool;
-  /** Async iterator yielding file paths. */
-  iterator: AsyncIterator<string>;
+  /** The raw file source (array, sync iterable, or async iterable). */
+  files: ProcessOptions['files'];
   /** Success/error callbacks. */
   handlers: TaskHandlers;
   /** Shared fatal-error holder. */
   fatalErr: FatalPoolErrorState;
   /** Promise that rejects on a fatal pool error. */
   poolErr: Promise<never>;
+}
+
+/**
+ * Per-file operations shared by the sync and async producer loops.
+ */
+interface DispatchOps {
+  /** Promise that rejects on a fatal pool error. */
+  poolErr: Promise<never>;
+  /** Dispatches one file to the pool and arms its back-pressure release. */
+  dispatch: (filePath: string) => void;
+  /** Awaits a free slot when the pool is saturated. */
+  throttle: () => Promise<void>;
+  /** Throws synchronously if the pool has emitted a fatal error. */
+  checkFatal: () => void;
+}
+
+/**
+ * Type guard: `true` when `files` is an async iterable.
+ *
+ * Lets the producer use the source's native iterator directly instead
+ * of re-wrapping every source in an `async function*` (which adds a
+ * microtask hop per file — doubling it for sources that are already
+ * async iterators).
+ *
+ * @param files - The file source.
+ * @returns `true` if `files` exposes `Symbol.asyncIterator`.
+ */
+function isAsyncIterable(files: ProcessOptions['files']): files is AsyncIterable<string> {
+  return typeof (files as AsyncIterable<string>)[Symbol.asyncIterator] === 'function';
 }
 
 /**
@@ -229,50 +258,98 @@ function createBackpressureGate(limit: number, poolErr: Promise<never>): Backpre
 }
 
 /**
- * Drives the producer loop: pulls files from the iterator, dispatches
- * each one to the pool, and applies O(1) back-pressure via a
+ * Producer loop for async file sources.
+ *
+ * Pulls from the source's native async iterator (racing a fatal pool
+ * error so a dead pool wakes a pending pull) and applies back-pressure.
+ *
+ * @param iterator - The source's native async iterator.
+ * @param ops - Shared per-file dispatch operations.
+ * @returns The number of files dispatched.
+ */
+async function pumpAsyncSource(iterator: AsyncIterator<string>, ops: DispatchOps): Promise<number> {
+  let total = 0;
+  try {
+    while (true) {
+      const result = await Promise.race([iterator.next(), ops.poolErr]);
+      ops.checkFatal();
+      if (result.done) break;
+      if (!result.value) continue;
+      ops.dispatch(result.value);
+      total++;
+      await ops.throttle();
+    }
+  } finally {
+    if (typeof iterator.return === 'function') await iterator.return(undefined);
+  }
+  return total;
+}
+
+/**
+ * Producer loop for synchronous file sources (arrays, sync iterables).
+ *
+ * Pulls each path synchronously — no per-file promise or race — and only
+ * suspends on back-pressure. A fatal pool error surfaces via the
+ * synchronous {@link DispatchOps.checkFatal} check, a synchronous throw
+ * from a dispatch to a destroyed pool, or the throttled slot wait.
+ *
+ * @param iterable - The synchronous file source.
+ * @param ops - Shared per-file dispatch operations.
+ * @returns The number of files dispatched.
+ */
+async function pumpSyncSource(iterable: Iterable<string>, ops: DispatchOps): Promise<number> {
+  let total = 0;
+  for (const value of iterable) {
+    ops.checkFatal();
+    if (!value) continue;
+    ops.dispatch(value);
+    total++;
+    await ops.throttle();
+  }
+  return total;
+}
+
+/**
+ * Drives the producer: pulls files from the source's native iterator,
+ * dispatches each one to the pool, and applies O(1) back-pressure via a
  * {@link BackpressureGate}.
  *
- * @param ctx - Pool, iterator, handlers and fatal-error plumbing.
+ * @param ctx - Pool, file source, handlers and fatal-error plumbing.
  * @returns The total number of files dispatched.
  */
 async function runDispatchLoop(ctx: DispatchContext): Promise<number> {
-  const {pool, iterator, handlers, fatalErr, poolErr} = ctx;
+  const {pool, files, handlers, fatalErr, poolErr} = ctx;
   const gate = createBackpressureGate(pool.concurrency, poolErr);
-  let total = 0;
 
   const checkFatal = (): void => {
     const fatal = fatalErr.current;
     if (fatal) throw fatal;
   };
-
-  try {
-    while (true) {
-      const result = await Promise.race([iterator.next(), poolErr]);
-      checkFatal();
-      if (result.done) break;
-      if (!result.value) continue;
-
+  const ops: DispatchOps = {
+    poolErr,
+    dispatch: (filePath: string): void => {
       gate.add();
-      createTaskPromise(pool, resolve(result.value), handlers, fatalErr).then(gate.release, gate.release);
-      total++;
-
+      createTaskPromise(pool, resolve(filePath), handlers, fatalErr).then(gate.release, gate.release);
+    },
+    throttle: async (): Promise<void> => {
       const slot = gate.acquire();
       if (slot) {
         await slot;
         checkFatal();
       }
-    }
+    },
+    checkFatal
+  };
 
-    const draining = gate.drain();
-    if (draining) {
-      await draining;
-      checkFatal();
-    }
-  } finally {
-    if (typeof iterator.return === 'function') await iterator.return(undefined);
+  const total = isAsyncIterable(files)
+    ? await pumpAsyncSource(files[Symbol.asyncIterator](), ops)
+    : await pumpSyncSource(files as Iterable<string>, ops);
+
+  const draining = gate.drain();
+  if (draining) {
+    await draining;
+    checkFatal();
   }
-
   return total;
 }
 
@@ -320,16 +397,6 @@ function getTaskHandlers(options: ProcessOptions, state: {success: number, faile
 }
 
 /**
- * Normalises a sync or async iterable of strings into an async generator.
- *
- * @param files - The file source to normalise.
- * @returns An async generator yielding each file path.
- */
-async function* toAsyncIterator(files: Iterable<string> | AsyncIterable<string>): AsyncGenerator<string, void, unknown> {
-  for await (const x of files) yield x;
-}
-
-/**
  * Processes files in parallel using a pool of worker threads.
  *
  * Creates a {@link ThreadPool}, iterates over the supplied file source,
@@ -361,9 +428,8 @@ export async function processFiles(options: ProcessOptions): Promise<ProcessResu
   try {
     const stats = {success: 0, failed: 0};
     const handlers = getTaskHandlers(options, stats);
-    const iterator = toAsyncIterator(options.files)[Symbol.asyncIterator]();
 
-    const total = await runDispatchLoop({pool, iterator, handlers, fatalErr, poolErr});
+    const total = await runDispatchLoop({pool, files: options.files, handlers, fatalErr, poolErr});
 
     return {
       total, success: stats.success, failed: stats.failed,
