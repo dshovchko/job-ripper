@@ -348,8 +348,8 @@ async function runDispatchLoop(ctx: DispatchContext): Promise<number> {
   const draining = gate.drain();
   if (draining) {
     await draining;
-    checkFatal();
   }
+  checkFatal();
   return total;
 }
 
