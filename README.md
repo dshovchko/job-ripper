@@ -58,7 +58,7 @@ npm run bench:md-html -- -c 8
 
 ## When to use
 
-**✅ CPU-bound work — this is what jori is for:**
+**✅ CPU-bound work — this is what job-ripper is for:**
 - Transpiling / compiling files (TS → JS, SCSS → CSS)
 - Image / video encoding and resizing
 - Markdown → HTML, PDF generation
@@ -194,7 +194,7 @@ jori "images/**/*.png" -w resize.mjs -c 8
 
 ### Stdin / pipeline mode
 
-When no `<glob>` argument is given, `jori` reads file paths from stdin (one per line). This enables Unix-style pipelines:
+When no `<glob>` argument is given, `job-ripper` reads file paths from stdin (one per line). This enables Unix-style pipelines:
 
 ```bash
 find . -name "*.log" -mtime -7 | jori -w analyze.mjs
@@ -220,7 +220,7 @@ export default async function(filePath: string, args: string[]): Promise<unknown
 
 > The type annotation above is for documentation purposes only — TypeScript is not required. A plain `.mjs` / `.cjs` module works exactly the same.
 
-The signature is `async` — jori correctly `await`s the result, so both sync and async bodies work. However:
+The signature is `async` — job-ripper correctly `await`s the result, so both sync and async bodies work. However:
 
 > **Prefer sync APIs inside the body.** Each worker runs in its own dedicated thread — blocking it is intentional and expected. `readFileSync`, `gzipSync`, `createHash` etc. avoid unnecessary Promise/microtask overhead. Reserve `async` for cases where you genuinely need it (e.g. calling an external HTTP API).
 
@@ -238,7 +238,7 @@ export default async function(filePath) {
 
 **Error handling:**
 
-| What you do | What jori does |
+| What you do | What job-ripper does |
 |---|---|
 | `throw new Error(...)` | Counts as **failed**, printed to stderr by default (suppressed with `--silent`). By default the process exits with code `1` after all files are processed. With `-k` / `--keep-going` the run finishes normally and exits `0`. |
 | Return normally | Counts as **success**; return value is forwarded to `onSuccess` in the programmatic API |
@@ -253,7 +253,7 @@ Looking for more? Check out the [`examples/`](https://github.com/dshovchko/job-r
 
 ### Pipeline chain (Unix pipes)
 
-After processing each file, `jori` echoes the resolved file path to stdout. If the input path was relative (for example from `find . -name "*.md"`), later pipeline stages will receive the resolved absolute path emitted by the previous stage. Worker scripts are responsible for writing derived files (e.g. `.html`) to disk themselves; the pipeline does not rewrite paths to derived filenames between stages.
+After processing each file, `job-ripper` echoes the resolved file path to stdout. If the input path was relative (for example from `find . -name "*.md"`), later pipeline stages will receive the resolved absolute path emitted by the previous stage. Worker scripts are responsible for writing derived files (e.g. `.html`) to disk themselves; the pipeline does not rewrite paths to derived filenames between stages.
 
 ```bash
 # stage 1: md → html   (writes .html files alongside .md)
@@ -457,7 +457,7 @@ export default async function(filePath) {
 | **Light** | < 10 ms (JSON parse, regex) | `25%` — tasks finish faster than IPC overhead; extra workers mostly idle |
 | **Medium** | 10-200 ms (transpile, lint) | `50-75%` *(default 75%)* |
 | **Heavy** | > 200 ms (image encode, PDF) | `75-100%` — long tasks justify saturating every core |
-| **I/O-bound** | network / disk limited | use `p-limit`, not jori |
+| **I/O-bound** | network / disk limited | use `p-limit`, not job-ripper |
 
 > **Why does lighter work need fewer workers?** When each task completes in < 10 ms the bottleneck shifts from CPU to the IPC round-trip between the main thread and workers. Spawning more workers than tasks can be dispatched adds synchronization noise without adding throughput. For heavy tasks the opposite is true — each thread stays busy for hundreds of milliseconds, so every extra core translates directly into lower wall time.
 
@@ -485,7 +485,7 @@ jori "**/*.png" -w resize.mjs --dry-run | wc -l  # count them
 
 ### File discovery: glob vs. `find` on different platforms
 
-jori accepts file paths in two ways: **built-in glob** (`jori "src/**/*.ts" -w ...`) or **stdin pipeline** (`find ... | jori -w ...`). The choice can have a significant impact on performance, especially on Windows.
+job-ripper accepts file paths in two ways: **built-in glob** (`jori "src/**/*.ts" -w ...`) or **stdin pipeline** (`find ... | jori -w ...`). The choice can have a significant impact on performance, especially on Windows.
 
 | Method | Linux / macOS | Windows (Git Bash / MSYS2) |
 |---|---|---|
@@ -493,13 +493,13 @@ jori accepts file paths in two ways: **built-in glob** (`jori "src/**/*.ts" -w .
 | `find ... \| jori` | Fast — native binary | **Slow** — MSYS2 POSIX emulation layer |
 | `find ... \| xargs` | Fast — native binaries | **Slow** — both `find` and `xargs` run under MSYS2 emulation |
 
-**Why `find` is slow on Windows:** Git Bash ships a POSIX-emulated `find` (via MSYS2) that translates every path and syscall through a compatibility layer, and piping through MSYS2's emulated shell adds further overhead for every path handed off to jori. Node.js glob libraries call the Windows filesystem API directly and avoid this overhead entirely.
+**Why `find` is slow on Windows:** Git Bash ships a POSIX-emulated `find` (via MSYS2) that translates every path and syscall through a compatibility layer, and piping through MSYS2's emulated shell adds further overhead for every path handed off to job-ripper. Node.js glob libraries call the Windows filesystem API directly and avoid this overhead entirely.
 
 **Recommendation:**
 
 - **Cross-platform projects** — use built-in glob or Node.js glob libraries. They perform consistently on all platforms.
 - **Linux/macOS-only** — `find` pipelines are fine and sometimes faster for complex filters (`-mtime`, `-size`, `-user`, etc.) that globs can't express.
-- **Windows with complex filters** — use PowerShell's `Get-ChildItem` or a Node.js script to produce the file list and pipe it into jori.
+- **Windows with complex filters** — use PowerShell's `Get-ChildItem` or a Node.js script to produce the file list and pipe it into job-ripper.
 
 ---
 
