@@ -31,8 +31,6 @@ export interface PoolOptions {
  * Internal representation of a queued work item.
  */
 interface Task {
-  /** Monotonically increasing task identifier. */
-  id: number;
   /** Absolute path of the file to be processed by the worker. */
   filePath: string;
   /** Settles the caller's promise on success, optionally with the worker's return value. */
@@ -73,17 +71,17 @@ export function calcConcurrency(val?: number): number {
  *
  * Emits:
  * - `'error'` — when a fatal (non-recoverable) worker error occurs.
- * - `'drained'` — after each task is dispatched to a worker and during shutdown.
  */
 export class ThreadPool extends EventEmitter {
   /** Effective concurrency (number of workers). */
   public readonly concurrency: number;
 
   private workers: Worker[] = [];
-  private freeWorkers: Worker[] = [];
+  /** Stack of indices into {@link workers} that are currently idle. */
+  private freeWorkers: number[] = [];
+  /** Task currently running on each worker, indexed by worker index (`undefined` when idle). */
+  private currentTasks: (Task | undefined)[] = [];
   private taskQueue = new FastQueue<Task>();
-  private activeTasks = 0;
-  private nextTaskId = 0;
   private isDestroyed = false;
 
   private maxQueueSize: number;
@@ -123,7 +121,7 @@ export class ThreadPool extends EventEmitter {
         ...(execArgv ? {execArgv} : {})
       });
 
-      worker.on('message', (msg) => this.handleMessage(worker, msg));
+      worker.on('message', (msg) => this.handleMessage(i, msg));
       worker.on('error', (err: Error) => this.handleError(err));
       worker.on('exit', (code) => {
         if (code !== 0 && !this.isDestroyed) {
@@ -132,7 +130,8 @@ export class ThreadPool extends EventEmitter {
       });
 
       this.workers.push(worker);
-      this.freeWorkers.push(worker);
+      this.freeWorkers.push(i);
+      this.currentTasks.push(undefined);
     }
 
     // Capture ELU baselines after all workers are spawned
@@ -182,7 +181,7 @@ export class ThreadPool extends EventEmitter {
     }
 
     return new Promise<unknown>((resolve, reject) => {
-      const task: Task = {id: this.nextTaskId++, filePath, resolve, reject};
+      const task: Task = {filePath, resolve, reject};
       this.taskQueue.enqueue(task);
       this.pump();
     });
@@ -206,22 +205,15 @@ export class ThreadPool extends EventEmitter {
   /**
    * Drains the task queue by assigning pending tasks to free workers.
    *
-   * Also wakes up producers that are blocked on queue capacity and
-   * emits `'drained'` after every dispatch.
+   * Also wakes up producers that are blocked on queue capacity.
    */
   private pump(): void {
     while (!this.isDestroyed && this.freeWorkers.length > 0 && this.taskQueue.size > 0) {
-      const worker = this.freeWorkers.pop()!;
+      const index = this.freeWorkers.pop()!;
       const task = this.taskQueue.dequeue()!;
-      this.activeTasks++;
 
-      // Store resolve/reject context mapping per worker
-      (worker as any).currentTask = task;
-
-      worker.postMessage({type: 'task', taskId: task.id, filePath: task.filePath});
-
-      // Notify external systems observing drained state
-      this.emit('drained');
+      this.currentTasks[index] = task;
+      this.workers[index].postMessage({type: 'task', filePath: task.filePath});
 
       // Unblock waiting producers sequentially to prevent "thundering herd"
       let availableSlots = this.maxQueueSize - this.taskQueue.size - this.pendingEnqueues;
@@ -251,11 +243,21 @@ export class ThreadPool extends EventEmitter {
   /**
    * Dispatches incoming worker messages to the appropriate handler.
    *
-   * @param worker - The worker that sent the message.
+   * @param index - Index of the worker that sent the message.
    * @param msg - The structured message payload.
    */
-  private handleMessage(worker: Worker, msg: any): void {
+  private handleMessage(index: number, msg: any): void {
     switch (msg.type) {
+      case 'task_done': {
+        this.finishTask(index, (task) => task.resolve(msg.result));
+        break;
+      }
+
+      case 'task_error': {
+        this.finishTask(index, (task) => task.reject(this.parseWorkerError(msg, 'Task failed')));
+        break;
+      }
+
       case 'ready':
         // Worker ready, pump if we have tasks
         this.pump();
@@ -265,32 +267,24 @@ export class ThreadPool extends EventEmitter {
         this.handleError(this.parseWorkerError(msg, 'Fatal worker error'));
         break;
       }
-
-      case 'task_done': {
-        this.finishTask(worker, (task) => task.resolve(msg.result));
-        break;
-      }
-
-      case 'task_error': {
-        this.finishTask(worker, (task) => task.reject(this.parseWorkerError(msg, 'Task failed')));
-        break;
-      }
     }
   }
 
   /**
    * Completes a task, frees its worker, and re-enters the pump loop.
    *
-   * @param worker - The worker that finished the task.
+   * @param index - Index of the worker that finished the task.
    * @param resolver - Callback that settles the task's promise (resolve or reject).
    */
-  private finishTask(worker: Worker, resolver: (task: Task) => void): void {
-    const task = (worker as any).currentTask as Task;
-    (worker as any).currentTask = undefined;
-    resolver(task);
-    this.activeTasks--;
-    this.freeWorkers.push(worker);
+  private finishTask(index: number, resolver: (task: Task) => void): void {
+    const task = this.currentTasks[index]!;
+    this.currentTasks[index] = undefined;
+    this.freeWorkers.push(index);
+
+    // Feed the just-freed worker before settling the completed promise so the
+    // worker thread never idles while main-thread continuations run.
     this.pump();
+    resolver(task);
   }
 
   /**
@@ -305,7 +299,6 @@ export class ThreadPool extends EventEmitter {
   private handleError(err: Error): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
-    this.emit('drained');
 
     // Reject anyone waiting for capacity
     while (this.capacityWaiters.size > 0) {
@@ -318,8 +311,8 @@ export class ThreadPool extends EventEmitter {
       t?.reject(err);
     }
     // Reject any tasks currently running and terminate workers
-    const promises = this.workers.map((w) => {
-      const task = (w as any).currentTask as Task | undefined;
+    const promises = this.workers.map((w, i) => {
+      const task = this.currentTasks[i];
       if (task) task.reject(err);
       return w.terminate();
     });
@@ -377,7 +370,6 @@ export class ThreadPool extends EventEmitter {
       return;
     }
     this.isDestroyed = true;
-    this.emit('drained');
 
     const error = new Error('ThreadPool closed');
 
@@ -393,8 +385,8 @@ export class ThreadPool extends EventEmitter {
     }
 
     // Reject and terminate all workers
-    const promises = this.workers.map((w) => {
-      const task = (w as any).currentTask;
+    const promises = this.workers.map((w, i) => {
+      const task = this.currentTasks[i];
       if (task) {
         task.reject(error);
       }
