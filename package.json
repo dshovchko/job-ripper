@@ -1,6 +1,6 @@
 {
   "name": "job-ripper",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Zero-dependency CLI that rips through CPU-heavy jobs using worker_threads",
   "license": "MIT",
   "keywords": [
